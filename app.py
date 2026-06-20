@@ -13,7 +13,7 @@ app = Flask(__name__)
 # =================================================================
 class LayananToko:
     def __init__(self):
-        # [Properti/Atribut Class] DATA BARANG WARUNG (SURYA 16 SUDAH DIHAPUS)
+        # [Properti/Atribut Class] DATA BARANG WARUNG
         self.data_barang = {
             "1": {"nama": "Indomie Goreng", "stok": 50, "harga": 3500, "terjual": 0},
             "2": {"nama": "Kopi Kapal Api", "stok": 40, "harga": 2000, "terjual": 0},
@@ -31,57 +31,68 @@ class LayananToko:
         """Metode untuk mengambil semua catatan riwayat transaksi kasir"""
         return self.laporan_keuangan
 
-    def proses_pembelian(self, id_barang, jumlah_beli, uang_bayar):
-        """Metode inti OOP untuk memproses validasi dan transaksi belanja kasir"""
-        # Cek apakah ID barang yang dikirim kasir ada di dalam menu toko
-        if id_barang not in self.data_barang:
-            return {"status": "gagal", "pesan": "Barang tidak ditemukan!"}, 404
-            
-        # Mengambil data produk berdasarkan ID yang dipilih
-        barang = self.data_barang[id_barang]
-        # Menghitung total harga: jumlah barang dikali harga satuan
-        total_harga = jumlah_beli * barang['harga']
-        
-        # Validasi 1: Cek apakah stok fisik di toko mencukupi
-        if barang['stok'] < jumlah_beli:
-            return {"status": "gagal", "pesan": "Stok tidak mencukupi!"}, 400
-            
-        # Validasi 2: Cek apakah uang yang diserahkan pembeli kurang
-        if uang_bayar < total_harga:
+    def proses_pembelian_multi(self, daftar_belanja, uang_bayar):
+        """Metode inti OOP untuk memproses transaksi yang berisi banyak item sekaligus"""
+        if not daftar_belanja:
+            return {"status": "gagal", "pesan": "Keranjang belanja kosong!"}, 400
+
+        total_harga_transaksi = 0
+        barang_diupdate = []
+
+        # Tahap 1: Validasi awal untuk semua item di dalam keranjang
+        for item in daftar_belanja:
+            id_barang = item.get('id_barang')
+            jumlah_beli = int(item.get('jumlah', 0))
+
+            if id_barang not in self.data_barang:
+                return {"status": "gagal", "pesan": f"Barang dengan ID {id_barang} tidak ditemukan!"}, 404
+
+            barang = self.data_barang[id_barang]
+            if barang['stok'] < jumlah_beli:
+                return {"status": "gagal", "pesan": f"Stok untuk {barang['nama']} tidak mencukupi!"}, 400
+
+            total_harga_transaksi += (jumlah_beli * barang['harga'])
+            # Simpan data sementara untuk eksekusi jika validasi lolos
+            barang_diupdate.append((barang, jumlah_beli))
+
+        # Validasi Uang Pembayaran
+        if uang_bayar < total_harga_transaksi:
             return {"status": "gagal", "pesan": "Uang yang dibayar kurang!"}, 400
-            
-        # KONDISI SUKSES: Kurangi stok barang dan tambah angka terjual di memori
-        barang['stok'] -= jumlah_beli
-        barang['terjual'] += jumlah_beli
-        # Menghitung uang kembalian untuk pembeli
-        kembalian = uang_bayar - total_harga
-        
-        # Menyusun data nota belanja baru dan memasukkannya ke dalam list riwayat laporan
+
+        # Tahap 2: Kondisi Sukses (Kurangi stok & update counter terjual)
+        nama_barang_tercatat = []
+        for barang, jumlah in barang_diupdate:
+            barang['stok'] -= jumlah
+            barang['terjual'] += jumlah
+            nama_barang_tercatat.append(f"{barang['nama']} ({jumlah}x)")
+
+        kembalian = uang_bayar - total_harga_transaksi
+        waktu_sekarang = datetime.now().strftime("%H:%M:%S")
+
+        # Masukkan ke dalam database riwayat laporan keuangan
+        # Menggabungkan nama item menjadi satu string (misal: "Indomie Goreng (3x), Kopi Kapal Api (2x)")
         self.laporan_keuangan.append({
-            "waktu": datetime.now().strftime("%H:%M:%S"), # Mencatat jam transaksi otomatis
-            "nama_barang": barang['nama'],
-            "jumlah": jumlah_beli,
-            "total_harga": total_harga,
+            "waktu": waktu_sekarang,
+            "nama_barang": ", ".join(nama_barang_tercatat),
+            "jumlah": sum(item[1] for item in barang_diupdate), # Total seluruh pcs barang
+            "total_harga": total_harga_transaksi,
             "uang_bayar": uang_bayar,
             "kembalian": kembalian,
             "penjual": "Kasir Utama"
         })
-        # Mengembalikan status sukses ke route server
-        return {"status": "sukses", "pesan": "Transaksi berhasil!"}, 200
+
+        return {"status": "sukses", "pesan": "Transaksi berhasil!", "waktu": waktu_sekarang, "kembalian": kembalian}, 200
 
     def tambah_stok_gudang(self, id_barang, jumlah_tambah):
         """Metode untuk menambah stok barang lama (Menu Restock Gudang)"""
         if id_barang in self.data_barang:
-            # Tambah jumlah stok lama dengan jumlah pasokan baru yang masuk
             self.data_barang[id_barang]['stok'] += jumlah_tambah
             return {"status": "sukses", "pesan": "Stok berhasil ditambahkan!"}, 200
         return {"status": "gagal", "pesan": "Barang tidak ditemukan!"}, 404
 
     def daftarkan_produk_baru(self, nama, stok, harga):
         """Metode untuk mendaftarkan varian produk baru ke dalam daftar toko"""
-        # Membuat ID baru otomatis dalam bentuk string berdasarkan jumlah barang saat ini + 1
         baru_id = str(len(self.data_barang) + 1)
-        # Memasukkan data produk baru ke objek dictionary toko
         self.data_barang[baru_id] = {"nama": nama, "stok": stok, "harga": harga, "terjual": 0}
         return {"status": "sukses", "pesan": "Produk baru berhasil didaftarkan!"}, 200
 
@@ -102,26 +113,21 @@ def index():
 @app.route('/api/dashboard-data', methods=['GET'])
 def get_data():
     """Route API GET: Mengirimkan semua data terbaru untuk dipasang di dashboard & Chart.js"""
-    # Memanggil data dari objek OOP layanan_toko
     data_barang = layanan_toko.ambil_semua_produk()
     laporan_keuangan_list = layanan_toko.ambil_semua_laporan()
 
-    # Menghitung otomatis total omzet pendapatan dari seluruh transaksi yang sukses
     total_riwayat = sum(log['total_harga'] for log in laporan_keuangan_list)
     
-    # Menyusun rangkuman data performa kasir
     performa_penjual = {
         "nama": "Kasir Utama",
         "total_transaksi": len(laporan_keuangan_list),
         "omzet_sekarang": total_riwayat
     }
     
-    # Menyiapkan susunan bulan dan data angka untuk dikirim ke diagram grafik Chart.js
     labels_bulan = ["Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
-    dataset_pendapatan = [total_riwayat, 0, 0, 0, 0, 0, 0] # Grafik pendapatan bulan ini
-    dataset_profit = [int(total_riwayat * 0.6), 0, 0, 0, 0, 0, 0] # Grafik taksiran profit bersih (60%)
+    dataset_pendapatan = [total_riwayat, 0, 0, 0, 0, 0, 0] 
+    dataset_profit = [int(total_riwayat * 0.6), 0, 0, 0, 0, 0, 0] 
 
-    # Mengirimkan seluruh paket data di atas dalam format JSON ke JavaScript di HTML
     return jsonify({
         "barang": data_barang,
         "total_pendapatan": total_riwayat,
@@ -136,15 +142,13 @@ def get_data():
 
 @app.route('/api/beli', methods=['POST'])
 def proses_beli():
-    """Route API POST: Menerima data transaksi kasir dari tombol 'Bayar' di HTML"""
-    # Menangkap data JSON yang dikirimkan oleh browser
-    id_barang = request.json.get('id_barang')
-    jumlah_beli = int(request.json.get('jumlah'))
-    uang_bayar = int(request.json.get('uang_bayar'))
+    """Route API POST Baru: Menerima list object belanjaan multi-item langsung dari HTML"""
+    # Menerima daftar item (array) dan jumlah uang fisik dari frontend
+    daftar_belanja = request.json.get('daftar_belanja', [])
+    uang_bayar = int(request.json.get('uang_bayar', 0))
     
-    # Melemparkan data kiriman tersebut ke metode logika transaksi di objek OOP kita
-    hasil, status_code = layanan_toko.proses_pembelian(id_barang, jumlah_beli, uang_bayar)
-    # Mengembalikan respon hasil transaksi berupa status sukses/gagal ke browser
+    # Melemparkan data ke method pengolah multi-item
+    hasil, status_code = layanan_toko.proses_pembelian_multi(daftar_belanja, uang_bayar)
     return jsonify(hasil), status_code
 
 @app.route('/api/tambah-stok', methods=['POST'])
@@ -153,7 +157,6 @@ def tambah_stok():
     id_barang = request.json.get('id_barang')
     jumlah_tambah = int(request.json.get('jumlah'))
     
-    # Memproses penambahan stok lewat metode objek OOP layanan_toko
     hasil, status_code = layanan_toko.tambah_stok_gudang(id_barang, jumlah_tambah)
     return jsonify(hasil), status_code
 
@@ -164,7 +167,6 @@ def barang_baru():
     stok = int(request.json.get('stok'))
     harga = int(request.json.get('harga'))
     
-    # Memproses pembuatan produk baru lewat metode objek OOP layanan_toko
     hasil, status_code = layanan_toko.daftarkan_produk_baru(nama, stok, harga)
     return jsonify(hasil), status_code
 
@@ -173,5 +175,4 @@ def barang_baru():
 # BAGIAN 4: MENYALAKAN SERVER (Running Application)
 # =================================================================
 if __name__ == '__main__':
-    # Menjalankan server lokal Flask dengan fitur 'debug=True' agar auto-reload saat disave
     app.run(debug=True)
